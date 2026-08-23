@@ -29,9 +29,9 @@ public sealed class SettingsForm : Form
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        AddPathRow(grid, 0, "FFmpeg", _ffmpeg, () => BrowseExe(_ffmpeg, "ffmpeg.exe"), async () => await InstallFfmpeg());
-        AddPathRow(grid, 1, "DeepFilterNet", _deepFilter, () => BrowseExe(_deepFilter, "deep-filter.exe"), async () => await InstallDeepFilter());
-        AddPathRow(grid, 2, "모델", _model, () => BrowseModel(), async () => await InstallModel());
+        AddPathRow(grid, 0, "FFmpeg", _ffmpeg, () => BrowseExe(_ffmpeg, "ffmpeg.exe"), InstallFfmpeg);
+        AddPathRow(grid, 1, "DeepFilterNet", _deepFilter, () => BrowseExe(_deepFilter, "deep-filter.exe"), InstallDeepFilter);
+        AddPathRow(grid, 2, "모델", _model, BrowseModel, InstallModel);
 
         grid.Controls.Add(_portable, 0, 3);
         grid.SetColumnSpan(_portable, 4);
@@ -87,17 +87,26 @@ public sealed class SettingsForm : Form
 
     private async Task InstallFfmpeg()
     {
-        await RunInstall(async p => _ffmpeg.Text = await DependencyInstaller.InstallFfmpegAsync(_settings, p));
+        await RunInstall(async p =>
+        {
+            _ffmpeg.Text = await DependencyInstaller.InstallFfmpegAsync(_settings, p);
+        });
     }
 
     private async Task InstallDeepFilter()
     {
-        await RunInstall(async p => _deepFilter.Text = await DependencyInstaller.InstallDeepFilterAsync(_settings, p));
+        await RunInstall(async p =>
+        {
+            _deepFilter.Text = await DependencyInstaller.InstallDeepFilterAsync(_settings, p);
+        });
     }
 
     private async Task InstallModel()
     {
-        await RunInstall(async p => _model.Text = await DependencyInstaller.InstallModelAsync(_settings, p));
+        await RunInstall(async p =>
+        {
+            _model.Text = await DependencyInstaller.InstallModelAsync(_settings, p);
+        });
     }
 
     private async Task RunInstall(Func<IProgress<string>, Task> action)
