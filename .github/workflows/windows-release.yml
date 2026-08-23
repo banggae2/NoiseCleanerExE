@@ -1,0 +1,85 @@
+name: Windows Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore NoiseCleaner.sln
+
+      - name: Publish Windows x64
+        run: >-
+          dotnet publish NoiseCleaner/NoiseCleaner.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          -o publish
+
+      - name: Prepare portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path dist/NoiseCleanerExE | Out-Null
+          Copy-Item publish/NoiseCleaner.exe dist/NoiseCleanerExE/NoiseCleanerExE.exe
+          Copy-Item README.md dist/NoiseCleanerExE/README.md
+          Copy-Item LICENSE dist/NoiseCleanerExE/LICENSE
+          if (Test-Path THIRD_PARTY_NOTICES.md) {
+            Copy-Item THIRD_PARTY_NOTICES.md dist/NoiseCleanerExE/THIRD_PARTY_NOTICES.md
+          }
+          New-Item -ItemType Directory -Force -Path dist/NoiseCleanerExE/tools | Out-Null
+          New-Item -ItemType Directory -Force -Path dist/NoiseCleanerExE/models | Out-Null
+          Set-Content -Path dist/NoiseCleanerExE/tools/INSTALLS_HERE.txt -Value 'FFmpeg and DeepFilterNet are installed here by NoiseCleanerExE at runtime.'
+          Set-Content -Path dist/NoiseCleanerExE/models/INSTALLS_HERE.txt -Value 'DeepFilterNet model files are installed here by NoiseCleanerExE at runtime.'
+          Compress-Archive -Path dist/NoiseCleanerExE -DestinationPath dist/NoiseCleanerExE-win-x64.zip -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoiseCleanerExE-win-x64
+          path: dist/NoiseCleanerExE-win-x64.zip
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "v0.1.$env:GITHUB_RUN_NUMBER"
+          $notes = @"
+          Windows x64 portable build of NoiseCleanerExE.
+
+          - Self-contained .NET 8 executable
+          - Python is not required
+          - FFmpeg, DeepFilterNet, and model files are not bundled
+          - Third-party dependencies can be downloaded by the app into its portable folders
+          "@
+          gh release create $tag dist/NoiseCleanerExE-win-x64.zip --target $env:GITHUB_SHA --title "NoiseCleanerExE $tag" --notes $notes
