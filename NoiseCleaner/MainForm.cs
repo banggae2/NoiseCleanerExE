@@ -4,9 +4,11 @@ namespace NoiseCleaner;
 
 public sealed class MainForm : Form
 {
+    private readonly AppSettings _settings = AppSettings.Load();
     private readonly TextBox _input = new() { Dock = DockStyle.Fill, ReadOnly = true, PlaceholderText = "MP4 / MKV / MOV / WAV 파일을 선택하세요" };
     private readonly Button _browse = new() { Text = "파일 선택", AutoSize = true };
     private readonly Button _start = new() { Text = "소음 제거 시작", AutoSize = true, Enabled = false };
+    private readonly Button _settingsButton = new() { Text = "설정", AutoSize = true };
     private readonly CheckBox _postFilter = new() { Text = "DeepFilterNet post-filter 사용", Checked = true, AutoSize = true };
     private readonly ProgressBar _progress = new() { Dock = DockStyle.Fill, Style = ProgressBarStyle.Continuous };
     private readonly TextBox _log = new() { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical, ReadOnly = true };
@@ -15,9 +17,9 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "NoiseCleaner - DeepFilterNet";
-        Width = 760;
-        Height = 520;
-        MinimumSize = new Size(620, 420);
+        Width = 800;
+        Height = 540;
+        MinimumSize = new Size(650, 440);
         AllowDrop = true;
         StartPosition = FormStartPosition.CenterScreen;
 
@@ -29,9 +31,11 @@ public sealed class MainForm : Form
 
         var actionRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
         actionRow.Controls.Add(_start);
+        actionRow.Controls.Add(_settingsButton);
         actionRow.Controls.Add(_postFilter);
 
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), RowCount = 5, ColumnCount = 1 };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), RowCount = 6, ColumnCount = 1 };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -40,11 +44,13 @@ public sealed class MainForm : Form
         layout.Controls.Add(new Label { Text = "동영상/오디오 파일", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, 0, 0);
         layout.Controls.Add(fileRow, 0, 1);
         layout.Controls.Add(actionRow, 0, 2);
-        layout.Controls.Add(_progress, 0, 3);
-        layout.Controls.Add(_log, 0, 4);
+        layout.Controls.Add(new Label { Text = "설정에서 FFmpeg / DeepFilterNet / 모델을 자동 설치하거나 직접 경로를 지정할 수 있습니다.", AutoSize = true }, 0, 3);
+        layout.Controls.Add(_progress, 0, 4);
+        layout.Controls.Add(_log, 0, 5);
         Controls.Add(layout);
 
         _browse.Click += (_, _) => Browse();
+        _settingsButton.Click += (_, _) => OpenSettings();
         _start.Click += async (_, _) => await ProcessAsync();
         DragEnter += (_, e) => { if (e.Data?.GetDataPresent(DataFormats.FileDrop) == true) e.Effect = DragDropEffects.Copy; };
         DragDrop += (_, e) =>
@@ -52,6 +58,16 @@ public sealed class MainForm : Form
             var files = e.Data?.GetData(DataFormats.FileDrop) as string[];
             if (files?.Length > 0) SelectFile(files[0]);
         };
+
+        Log($"설정 파일: {AppSettings.SettingsFile}");
+        Log($"모드: {(_settings.PortableMode ? "Portable" : "LocalAppData")}");
+    }
+
+    private void OpenSettings()
+    {
+        using var form = new SettingsForm(_settings);
+        form.ShowDialog(this);
+        Log("설정 갱신됨");
     }
 
     private void Browse()
@@ -76,18 +92,21 @@ public sealed class MainForm : Form
     {
         if (_selectedFile is null) return;
 
-        var appDir = AppContext.BaseDirectory;
-        var ffmpeg = Path.Combine(appDir, "tools", "ffmpeg.exe");
-        var deepFilter = Path.Combine(appDir, "tools", "deep-filter.exe");
+        var ffmpeg = _settings.ResolveFfmpegPath();
+        var deepFilter = _settings.ResolveDeepFilterPath();
+        var model = _settings.ResolveModelPath();
+
         if (!File.Exists(ffmpeg) || !File.Exists(deepFilter))
         {
-            MessageBox.Show(this,
-                "tools 폴더에 ffmpeg.exe와 deep-filter.exe가 필요합니다.\nREADME의 설치 방법을 확인하세요.",
-                "필수 파일 없음", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            var result = MessageBox.Show(this,
+                "FFmpeg 또는 DeepFilterNet 실행파일을 찾을 수 없습니다.\n설정에서 자동 설치하거나 경로를 지정하시겠습니까?",
+                "필수 파일 없음", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (result == DialogResult.Yes) OpenSettings();
             return;
         }
 
         _start.Enabled = false;
+        _settingsButton.Enabled = false;
         _progress.Style = ProgressBarStyle.Marquee;
         var tempDir = Path.Combine(Path.GetTempPath(), "NoiseCleaner", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
@@ -105,8 +124,11 @@ public sealed class MainForm : Form
             await RunAsync(ffmpeg, $"-y -i \"{input}\" -vn -ac 2 -ar 48000 -c:a pcm_s16le \"{wav}\"");
 
             Log("2/3 DeepFilterNet 소음 제거...");
-            var pf = _postFilter.Checked ? " --pf" : "";
-            await RunAsync(deepFilter, $"-D{pf} -o \"{outDir}\" \"{wav}\"");
+            var pf = _postFilter.Checked ? " --pf" : string.Empty;
+            var modelArg = model is not null ? $" -m \"{model}\"" : string.Empty;
+            if (model is not null) Log($"모델: {model}");
+            else Log("모델: deep-filter 기본 내장 모델 사용");
+            await RunAsync(deepFilter, $"-D{pf}{modelArg} -o \"{outDir}\" \"{wav}\"");
 
             var cleanedWav = Directory.GetFiles(outDir, "*.wav").OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
             if (cleanedWav is null) throw new InvalidOperationException("DeepFilterNet 결과 WAV를 찾을 수 없습니다.");
@@ -138,7 +160,8 @@ public sealed class MainForm : Form
             try { Directory.Delete(tempDir, true); } catch { }
             _progress.Style = ProgressBarStyle.Continuous;
             _progress.Value = 0;
-            _start.Enabled = true;
+            _start.Enabled = _selectedFile is not null && File.Exists(_selectedFile);
+            _settingsButton.Enabled = true;
         }
     }
 
