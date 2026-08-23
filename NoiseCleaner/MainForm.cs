@@ -133,8 +133,8 @@ public sealed class MainForm : Form
             var outDir = Path.Combine(tempDir, "dfout");
             Directory.CreateDirectory(outDir);
 
-            Log("1/3 오디오 추출 및 48 kHz 변환...");
-            await RunAsync(ffmpeg, $"-y -i \"{input}\" -vn -ar 48000 -c:a pcm_s24le \"{wav}\"");
+            Log("1/3 오디오 추출 및 48 kHz / 16-bit PCM 변환...");
+            await RunAsync(ffmpeg, $"-y -i \"{input}\" -vn -ar 48000 -c:a pcm_s16le \"{wav}\"");
 
             Log($"2/3 DeepFilterNet 소음 제거... ({preset.Name}, attenuation {preset.AttenuationDb} dB)");
             var pf = _postFilter.Checked ? " --pf" : string.Empty;
