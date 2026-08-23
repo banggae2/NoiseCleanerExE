@@ -1,0 +1,6 @@
+.vs/
+**/bin/
+**/obj/
+tools/*.exe
+*.user
+*.suo
