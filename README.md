@@ -2,24 +2,11 @@
 
 Windows GUI wrapper for local video/audio noise reduction using **DeepFilterNet** and **FFmpeg**. No Python is required on the user's machine.
 
-## Features
+## Portable-only design
 
-- Drag & drop MP4/MKV/MOV/AVI/WebM/WAV and other common media files
-- Extracts audio to 48 kHz WAV with FFmpeg
-- Runs the native `deep-filter.exe` CLI
-- Optional DeepFilterNet post-filter (`--pf`)
-- Supports an explicit DeepFilterNet model with `-m`
-- Muxes cleaned audio back into the original video without re-encoding the video stream
-- Outputs `<name>_clean.mp4` or `<name>_clean.wav`
-- Settings are saved to `%LOCALAPPDATA%\NoiseCleaner\settings.json`
+NoiseCleanerExE is intentionally portable-only. It does not install dependencies into `%LOCALAPPDATA%` and does not use a separate installer.
 
-## Dependency setup
-
-Open **Settings** in the app. Each dependency can either be installed automatically or pointed at an existing file.
-
-### Portable mode
-
-When Portable mode is enabled, automatic installs go beside the executable:
+All downloaded dependencies live beside `NoiseCleaner.exe`:
 
 ```text
 NoiseCleaner.exe
@@ -30,18 +17,22 @@ models/
   DeepFilterNet3_onnx.tar.gz
 ```
 
-### LocalAppData mode
+Move the whole folder to another Windows PC or drive and the app keeps using the same relative paths.
 
-When Portable mode is disabled, dependencies are installed under:
+## Features
 
-```text
-%LOCALAPPDATA%\NoiseCleaner\tools\
-%LOCALAPPDATA%\NoiseCleaner\models\
-```
-
-You can also choose arbitrary paths for FFmpeg, DeepFilterNet and the model.
+- Drag & drop MP4/MKV/MOV/AVI/WebM/WAV and other common media files
+- Extracts audio to 48 kHz WAV with FFmpeg
+- Runs the native `deep-filter.exe` CLI
+- Optional DeepFilterNet post-filter (`--pf`)
+- Uses `models/DeepFilterNet3_onnx.tar.gz` with `-m` when the model has been downloaded
+- Muxes cleaned audio back into the original video without re-encoding the video stream
+- Outputs `<name>_clean.mp4` or `<name>_clean.wav`
+- No registry entries or LocalAppData dependency storage
 
 ## Automatic downloads
+
+Open **설정 / 포터블 구성** in the app and press **자동 설치** for the components you need. Downloads go only into the `tools` and `models` folders next to the executable.
 
 The app downloads third-party components directly from their upstream public sources at runtime. They are not committed to or bundled in this repository.
 
