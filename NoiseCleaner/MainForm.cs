@@ -9,7 +9,8 @@ public sealed class MainForm : Form
     private readonly Button _browse = new() { Text = "파일 선택", AutoSize = true };
     private readonly Button _start = new() { Text = "소음 제거 시작", AutoSize = true, Enabled = false };
     private readonly Button _settingsButton = new() { Text = "설정", AutoSize = true };
-    private readonly CheckBox _postFilter = new() { Text = "DeepFilterNet post-filter 사용", Checked = true, AutoSize = true };
+    private readonly ComboBox _qualityPreset = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 180 };
+    private readonly CheckBox _postFilter = new() { Text = "Post-filter", Checked = false, AutoSize = true };
     private readonly ProgressBar _progress = new() { Dock = DockStyle.Fill, Style = ProgressBarStyle.Continuous };
     private readonly TextBox _log = new() { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical, ReadOnly = true };
     private string? _selectedFile;
@@ -17,11 +18,20 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "NoiseCleaner - DeepFilterNet";
-        Width = 800;
-        Height = 540;
-        MinimumSize = new Size(650, 440);
+        Width = 820;
+        Height = 560;
+        MinimumSize = new Size(670, 460);
         AllowDrop = true;
         StartPosition = FormStartPosition.CenterScreen;
+
+        _qualityPreset.Items.AddRange(new object[]
+        {
+            new QualityPreset("자연스러움", 12),
+            new QualityPreset("균형 (추천)", 18),
+            new QualityPreset("강한 제거", 30),
+            new QualityPreset("최대 제거", 100)
+        });
+        _qualityPreset.SelectedIndex = 1;
 
         var fileRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
         fileRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -32,6 +42,8 @@ public sealed class MainForm : Form
         var actionRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
         actionRow.Controls.Add(_start);
         actionRow.Controls.Add(_settingsButton);
+        actionRow.Controls.Add(new Label { Text = "품질:", AutoSize = true, Padding = new Padding(8, 6, 0, 0) });
+        actionRow.Controls.Add(_qualityPreset);
         actionRow.Controls.Add(_postFilter);
 
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), RowCount = 6, ColumnCount = 1 };
@@ -44,7 +56,7 @@ public sealed class MainForm : Form
         layout.Controls.Add(new Label { Text = "동영상/오디오 파일", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, 0, 0);
         layout.Controls.Add(fileRow, 0, 1);
         layout.Controls.Add(actionRow, 0, 2);
-        layout.Controls.Add(new Label { Text = "설정에서 FFmpeg / DeepFilterNet / 모델을 자동 설치하거나 직접 경로를 지정할 수 있습니다.", AutoSize = true }, 0, 3);
+        layout.Controls.Add(new Label { Text = "추천 기본값: 균형 18 dB / Post-filter OFF / AAC 256 kbps", AutoSize = true }, 0, 3);
         layout.Controls.Add(_progress, 0, 4);
         layout.Controls.Add(_log, 0, 5);
         Controls.Add(layout);
@@ -59,15 +71,14 @@ public sealed class MainForm : Form
             if (files?.Length > 0) SelectFile(files[0]);
         };
 
-        Log($"설정 파일: {AppSettings.SettingsFile}");
-        Log($"모드: {(_settings.PortableMode ? "Portable" : "LocalAppData")}");
+        Log("모드: Portable only");
+        Log("기본 품질: 균형 18 dB / Post-filter OFF / AAC 256 kbps");
     }
 
     private void OpenSettings()
     {
         using var form = new SettingsForm(_settings);
         form.ShowDialog(this);
-        Log("설정 갱신됨");
     }
 
     private void Browse()
@@ -99,11 +110,13 @@ public sealed class MainForm : Form
         if (!File.Exists(ffmpeg) || !File.Exists(deepFilter))
         {
             var result = MessageBox.Show(this,
-                "FFmpeg 또는 DeepFilterNet 실행파일을 찾을 수 없습니다.\n설정에서 자동 설치하거나 경로를 지정하시겠습니까?",
+                "FFmpeg 또는 DeepFilterNet 실행파일을 찾을 수 없습니다.\n설정에서 자동 설치하시겠습니까?",
                 "필수 파일 없음", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (result == DialogResult.Yes) OpenSettings();
             return;
         }
+
+        var preset = _qualityPreset.SelectedItem as QualityPreset ?? new QualityPreset("균형", 18);
 
         _start.Enabled = false;
         _settingsButton.Enabled = false;
@@ -121,14 +134,15 @@ public sealed class MainForm : Form
             Directory.CreateDirectory(outDir);
 
             Log("1/3 오디오 추출 및 48 kHz 변환...");
-            await RunAsync(ffmpeg, $"-y -i \"{input}\" -vn -ac 2 -ar 48000 -c:a pcm_s16le \"{wav}\"");
+            await RunAsync(ffmpeg, $"-y -i \"{input}\" -vn -ar 48000 -c:a pcm_s24le \"{wav}\"");
 
-            Log("2/3 DeepFilterNet 소음 제거...");
+            Log($"2/3 DeepFilterNet 소음 제거... ({preset.Name}, attenuation {preset.AttenuationDb} dB)");
             var pf = _postFilter.Checked ? " --pf" : string.Empty;
             var modelArg = model is not null ? $" -m \"{model}\"" : string.Empty;
+            var attenuationArg = $" --atten-lim {preset.AttenuationDb}";
             if (model is not null) Log($"모델: {model}");
             else Log("모델: deep-filter 기본 내장 모델 사용");
-            await RunAsync(deepFilter, $"-D{pf}{modelArg} -o \"{outDir}\" \"{wav}\"");
+            await RunAsync(deepFilter, $"-D{pf}{attenuationArg}{modelArg} -o \"{outDir}\" \"{wav}\"");
 
             var cleanedWav = Directory.GetFiles(outDir, "*.wav").OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
             if (cleanedWav is null) throw new InvalidOperationException("DeepFilterNet 결과 WAV를 찾을 수 없습니다.");
@@ -143,9 +157,9 @@ public sealed class MainForm : Form
             }
             else
             {
-                Log("3/3 원본 영상에 정제 오디오 결합...");
+                Log("3/3 원본 영상에 정제 오디오 결합... (AAC 256 kbps)");
                 var output = Path.Combine(parent, baseName + "_clean.mp4");
-                await RunAsync(ffmpeg, $"-y -i \"{input}\" -i \"{cleanedWav}\" -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 192k -shortest \"{output}\"");
+                await RunAsync(ffmpeg, $"-y -i \"{input}\" -i \"{cleanedWav}\" -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 256k -shortest \"{output}\"");
                 Log($"완료: {output}");
                 MessageBox.Show(this, $"완료!\n{output}", "NoiseCleaner", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -192,5 +206,10 @@ public sealed class MainForm : Form
     {
         if (InvokeRequired) { BeginInvoke(() => Log(text)); return; }
         _log.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}");
+    }
+
+    private sealed record QualityPreset(string Name, int AttenuationDb)
+    {
+        public override string ToString() => $"{Name} ({AttenuationDb} dB)";
     }
 }
