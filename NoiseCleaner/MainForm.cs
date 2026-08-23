@@ -138,11 +138,11 @@ public sealed class MainForm : Form
 
             Log($"2/3 DeepFilterNet 소음 제거... ({preset.Name}, attenuation {preset.AttenuationDb} dB)");
             var pf = _postFilter.Checked ? " --pf" : string.Empty;
-            var modelArg = model is not null ? $" -m \"{model}\"" : string.Empty;
-            var attenuationArg = $" --atten-lim {preset.AttenuationDb}";
+            var modelArg = model is not null ? $" --model \"{model}\"" : string.Empty;
+            var attenuationArg = $" --atten-lim-db {preset.AttenuationDb}";
             if (model is not null) Log($"모델: {model}");
             else Log("모델: deep-filter 기본 내장 모델 사용");
-            await RunAsync(deepFilter, $"-D{pf}{attenuationArg}{modelArg} -o \"{outDir}\" \"{wav}\"");
+            await RunAsync(deepFilter, $"--compensate-delay{pf}{attenuationArg}{modelArg} --output-dir \"{outDir}\" \"{wav}\"");
 
             var cleanedWav = Directory.GetFiles(outDir, "*.wav").OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
             if (cleanedWav is null) throw new InvalidOperationException("DeepFilterNet 결과 WAV를 찾을 수 없습니다.");
